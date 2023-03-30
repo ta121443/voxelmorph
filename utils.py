@@ -1,4 +1,4 @@
-def default_features():
+def default_unet_features():
   nb_features = [
     [16, 32, 32, 32],
     [32, 32, 32, 32, 16, 16]
