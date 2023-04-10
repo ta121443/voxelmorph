@@ -29,7 +29,7 @@ class ConvBlock(nn.Module):
     return out
 
 class Unet(nn.Module):
-  def __init__(self, inshape=None, nb_features=None, max_pool=2):
+  def __init__(self, inshape=None, nb_features=None, max_pool=2, infeats=None):
     super().__init__()
 
     ndims = len(inshape)
@@ -48,7 +48,7 @@ class Unet(nn.Module):
     self.pooling = [MaxPooling(s) for s in max_pool]
     self.upsampling = [nn.Upsample(scale_factor=s, mode='nearest') for s in max_pool]
 
-    prev_nf = inshape[-1]
+    prev_nf = infeats
     encoder_nfs = [prev_nf]
     self.encoder = nn.ModuleList()
 
@@ -103,6 +103,62 @@ class Unet(nn.Module):
     return x
 
 class VxmDense(nn.Module):
+  def __init__(
+    self, 
+    inshape, 
+    nb_unet_features=None, 
+    src_feats=1, 
+    trg_feats=1,
+    int_downsize=2,
+    int_steps=7
+  ):
+    super().__init__()
+
+    ndims = len(inshape)
+
+    self.unet_model = Unet(
+      inshape,
+      nb_features=nb_unet_features,
+      infeats=(src_feats + trg_feats)
+    )
+
+    Conv = getattr(nn, 'Conv%dd' % ndims)
+    self.flow = Conv(self.unet_model.final_nf, ndims, kernel_size=3, padding=1)
+
+    self.flow.weight = nn.Parameter(Normal(0, 1e-5).sample(self.flow.weight.shape))
+    self.flow.bias = nn.Parameter(torch.zeros(self.flow.bias.shape))
+
+    self.resize = ResizeTransform(int_downsize, ndims)
+    self.fullsize = ResizeTransform(1 / int_downsize, ndims)
+
+    down_shape = [int(dim / int_downsize) for dim in inshape]
+    self.integrate = VecInt(down_shape, int_steps) if int_steps > 0 else None
+
+    self.transformer = SpatialTransformer(inshape)
+
+  def forward(self, source, target, registration=False):
+
+    x = torch.cat([source, target], dim=1)
+    x = self.unet_model(x)
+
+    flow_field = self.flow(x)
+
+    pos_flow = flow_field
+    if self.resize:
+      pos_flow = self.resize(pos_flow)
+
+    preint_flow = pos_flow
+
+    pos_flow = self.integrate(pos_flow)
+    pos_flow = self.fullsize(pos_flow)
+
+    y_source = self.transformer(source, pos_flow)
+    y_target = None
+
+    if not registration:
+      return y_source, preint_flow
+
+class VxxmDense(nn.Module):
   def __init__(self, 
                inshape,
                nb_unet_features=None,
@@ -120,7 +176,6 @@ class VxmDense(nn.Module):
     self.training = True
 
     ndims = len(inshape)
-    assert ndims in [1, 2, 3], 'ndims should be one of 1, 2, or 3. found: %d' % ndims
 
     self.unet_model = Unet(
       inshape,
@@ -174,5 +229,4 @@ nb_features = [
     [16, 32, 32, 32],         # encoder features
     [32, 32, 32, 32, 32, 16, 16]  # decoder features
 ]
-
-unet = Unet(inshape=(32,32,2), nb_features=nb_features)
+VxmDense(inshape=(32,32,2), nb_unet_features=nb_features)
