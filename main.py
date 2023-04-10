@@ -4,8 +4,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets
 from torchvision.transforms import ToTensor, Lambda
 
-from networks import CNN
-import voxelmorph as vxm
+from networks import VxmDense
 
 training_data = datasets.MNIST(
   root='data',
