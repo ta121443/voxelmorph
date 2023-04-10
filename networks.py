@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.normal import Normal
-# デバッグツール
 
 from utils import default_unet_features
 from layers import ResizeTransform, VecInt, SpatialTransformer
