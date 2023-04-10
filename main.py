@@ -1,66 +1,70 @@
-# imports
-import os, sys
+import torch
+from torch import nn
+from torch.utils.data import DataLoader
+from torchvision import datasets
+from torchvision.transforms import ToTensor, Lambda
 
-# third party imports
-import numpy as np
-import tensorflow as tf
-assert tf.__version__.startswith('2.'), 'This tutorial assumes Tensorflow 2.0+'
-from tensorflow.keras.datasets import mnist
-
+from networks import CNN
 import voxelmorph as vxm
-import neurite as ne
 
-from networks import Unet
+training_data = datasets.MNIST(
+  root='data',
+  train=True,
+  download=True,
+  transform=ToTensor()
+)
 
-# load MNIST data. 
-# `mnist.load_data()` already splits our data into train and test.  
-(x_train_load, y_train_load), (x_test_load, y_test_load) = mnist.load_data()
+test_data = datasets.MNIST(
+  root="data",
+  train=False,
+  download=True,
+  transform=ToTensor()
+)
 
-digit_sel = 5
+train_dataloader = DataLoader(training_data, batch_size=64)
+test_dataloader = DataLoader(test_data, batch_size=64)
 
-# extract only instances of the digit 5
-x_train = x_train_load[y_train_load==digit_sel, ...]
-y_train = y_train_load[y_train_load==digit_sel]
-x_test = x_test_load[y_test_load==digit_sel, ...]
-y_test = y_test_load[y_test_load==digit_sel]
+model = vxm.networks.VxmDense(inshape=(512, 512))
 
-nb_val = 1000  # keep 1,000 subjects for validation
-x_val = x_train[-nb_val:, ...]  # this indexing means "the last nb_val entries" of the zeroth axis
-y_val = y_train[-nb_val:]
-x_train = x_train[:-nb_val, ...]
-y_train = y_train[:-nb_val]
 
-nb_vis = 5
+def train_loop(dataloader, model, loss_fn, optimizer):
+  size = len(dataloader.dataset)
+  for batch, (X, y) in enumerate(dataloader):
 
-# choose nb_vis sample indexes
-idx = np.random.choice(x_train.shape[0], nb_vis, replace=False)
-example_digits = [f for f in x_train[idx, ...]]
+    pred = model(X)
+    loss = loss_fn(pred, y)
 
-# plot
-# ne.plot.slices(example_digits, cmaps=['gray'], do_colorbars=True);
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
 
-# fix data
-x_train = x_train.astype('float')/255
-x_val = x_val.astype('float')/255
-x_test = x_test.astype('float')/255
+    if batch % 100 == 0:
+      loss, current = loss.item(), batch * len(X)
+      print(f"loss: {loss:>7f} [{current:>5d}/{size:>5d}]")
 
-pad_amount = ((0, 0), (2,2), (2,2))
+def test_loop(dataloader, model, loss_fn):
+  size = len(dataloader.dataset)
+  test_loss, correct = 0, 0
 
-# fix data
-x_train = np.pad(x_train, pad_amount, 'constant')
-x_val = np.pad(x_val, pad_amount, 'constant')
-x_test = np.pad(x_test, pad_amount, 'constant')
+  with torch.no_grad():
+    for X, y in dataloader:
+      pred = model(X)
+      test_loss += loss_fn(pred, y).item()
+      correct += (pred.argmax(1) == y).type(torch.float).sum().item()
 
-ndim = 2
-unet_input_features = 2
-inshape = (*x_train.shape[1:], unet_input_features)
+  test_loss /= size
+  correct /= size
+  print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
 
-nb_features = [
-    [32, 32, 32, 32],         # encoder features
-    [32, 32, 32, 32, 32, 16]  # decoder features
-]
+learning_rate = 1e-3
+batch_size = 64
+epochs = 5
 
-unet = Unet(inshape=inshape, nb_features=nb_features, infeats=unet_input_features)
+loss_fn = nn.CrossEntropyLoss()
+optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
 
-print('input shape: ', unet.input.shape)
-print('output shape:', unet.output.shape)
+for t in range(epochs):
+  print(f"Epoch {t+1}\n----------------------------------------------")
+  train_loop(train_dataloader, model, loss_fn, optimizer)
+  test_loop(test_dataloader, model, loss_fn)
+print("Done!")
