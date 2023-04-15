@@ -27,7 +27,7 @@ class CustomMNISTDataset(Dataset):
     self.zero_phi = torch.zeros(*vol_shape, 2)
   
   def __len__(self):
-    return len(mnist_train)
+    return len(self.mnist)
 
   def __get_item__(self):
     idx1 = torch.randint(0, self.data_size, (1,))
